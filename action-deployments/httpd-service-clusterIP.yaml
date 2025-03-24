@@ -1,0 +1,19 @@
+# Create a pod called httpd using the image httpd:alpine in the default namespace. 
+# Next, create a service of type ClusterIP by the same name (httpd). 
+# The target port for the service should be 80.
+
+apiVersion: v1
+kind: Service
+metadata:
+  creationTimestamp: null
+  labels:
+    run: httpd
+  name: httpd
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    run: httpd
+  type: ClusterIP
