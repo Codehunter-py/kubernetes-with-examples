@@ -25,7 +25,7 @@ Ensure you have the following installed:
 
 ### Clone the Repository
 ```sh
-$ git clone https://github.com/your-username/kubernetes-with-examples.git
+$ git clone https://github.com/codehunter-py/kubernetes-with-examples.git
 $ cd kubernetes-with-examples
 ```
 
@@ -33,7 +33,7 @@ $ cd kubernetes-with-examples
 Each folder contains specific Kubernetes YAML configurations and scripts.
 For example, to apply a deployment from `action-deployments`:
 ```sh
-$ kubectl apply -f action-deployments/my-deployment.yaml
+$ kubectl apply -f action-deployments/httpd-deployment.yaml
 ```
 
 ## 📌 Topics Covered
