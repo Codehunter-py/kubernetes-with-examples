@@ -1,0 +1,199 @@
+# Step 1: Backup the data
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: webapp-backup
+spec:
+  template:
+    spec:
+      containers:
+      - name: backup
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /backup
+          cp /data/webapp/notes.json /backup/notes.json.backup
+          echo "Backup completed at $(date)" > /backup/backup.log
+        volumeMounts:
+        - name: webapp-data
+          mountPath: /data
+        - name: backup-volume
+          mountPath: /backup
+      volumes:
+      - name: webapp-data
+        hostPath:
+          path: /data/webapp
+      - name: backup-volume
+        emptyDir: {}
+      restartPolicy: Never
+  backoffLimit: 1
+---
+# Step 2: Delete the original deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp
+        image: node:18-alpine
+---
+# Step 3: Restore and redeploy
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: webapp-restore
+spec:
+  template:
+    spec:
+      containers:
+      - name: restore
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          mkdir -p /data/webapp
+          cp /backup/notes.json.backup /data/webapp/notes.json
+          echo "Restore completed at $(date)" > /data/webapp/restore.log
+        volumeMounts:
+        - name: webapp-data
+          mountPath: /data
+        - name: backup-volume
+          mountPath: /backup
+      volumes:
+      - name: webapp-data
+        hostPath:
+          path: /data/webapp
+      - name: backup-volume
+        emptyDir: {}
+      restartPolicy: Never
+  backoffLimit: 1
+---
+# Step 4: Redeploy the application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp
+        image: node:18-alpine
+        ports:
+        - containerPort: 3000
+        volumeMounts:
+        - name: webapp-storage
+          mountPath: /app/data
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          cd /app
+          npm init -y
+          npm install express
+          echo 'const express = require("express");
+          const fs = require("fs");
+          const path = require("path");
+          const app = express();
+          const dataFile = "/app/data/notes.json";
+          
+          if (!fs.existsSync(dataFile)) {
+            fs.writeFileSync(dataFile, JSON.stringify([]));
+          }
+          
+          app.use(express.json());
+          app.use(express.static("public"));
+          
+          app.get("/api/notes", (req, res) => {
+            const notes = JSON.parse(fs.readFileSync(dataFile));
+            res.json(notes);
+          });
+          
+          app.post("/api/notes", (req, res) => {
+            const notes = JSON.parse(fs.readFileSync(dataFile));
+            notes.push({
+              id: Date.now(),
+              text: req.body.text,
+              timestamp: new Date().toISOString()
+            });
+            fs.writeFileSync(dataFile, JSON.stringify(notes));
+            res.json({ success: true });
+          });
+          
+          app.listen(3000);' > server.js
+          mkdir -p public
+          echo '<!DOCTYPE html>
+          <html>
+          <head>
+            <title>Note Taking App</title>
+            <style>
+              body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+              .note { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+              input { width: 100%; padding: 10px; margin: 10px 0; }
+              button { background: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; }
+            </style>
+          </head>
+          <body>
+            <h1>Note Taking App</h1>
+            <input type="text" id="noteInput" placeholder="Enter your note">
+            <button onclick="addNote()">Add Note</button>
+            <div id="notes"></div>
+            <script>
+              async function loadNotes() {
+                const response = await fetch("/api/notes");
+                const notes = await response.json();
+                document.getElementById("notes").innerHTML = notes
+                  .map(note => `<div class="note">${note.text}<br><small>${note.timestamp}</small></div>`)
+                  .join("");
+              }
+              
+              async function addNote() {
+                const text = document.getElementById("noteInput").value;
+                if (!text) return;
+                
+                await fetch("/api/notes", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ text })
+                });
+                
+                document.getElementById("noteInput").value = "";
+                loadNotes();
+              }
+              
+              loadNotes();
+            </script>
+          </body>
+          </html>' > public/index.html
+          node server.js
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: webapp-storage
+        persistentVolumeClaim:
+          claimName: webapp-pvc 
